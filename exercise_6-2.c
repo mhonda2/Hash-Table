@@ -1,274 +1,260 @@
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
-#define BUFSIZE 1000
-#define MAXLEN 100
+#define COMP_LIMIT 6
 
-#define GROUP_MAX 1000
-#define COMP_INDEX_LIMIT_DEFAULT 6
+//-------------------------------------------------------------------------
+typedef struct tnode tnode;
+struct tnode {
+  const char* word;
+  int count;
+  tnode* left;
+  tnode* right;
+};
 
-char buf[BUFSIZE];
-int bufp = 0;
+//-------------------------------------------------------------------------
+typedef struct tree tree;
+struct tree {
+  tnode* root;
+  size_t size;
+};
 
-char *keyword_arr[]  = {"include", "main" ,"return","int","char","void","\0"};
-// Contains the list of keyword.
-int keyword_count = 0;
-
-
-typedef struct var{
-	char word[MAXLEN];
-	int count;
-	struct var *left;
-	struct var *right;
-}variable;
-
-// Data structure to hold the variables.
-
-
-
-variable *root  = NULL;
-
-/*
- All the variable with at least cmp_index_limit characters,
- which is obtained as cmd line argument(default 6)
- will be in the same group.
-*/
-variable groups[GROUP_MAX];
-int group_count = 0;
-
-int cmp_index_limit = COMP_INDEX_LIMIT_DEFAULT;
-
-
-void copy_var(variable *s,variable *t) {
-
-	strcpy(s->word,t->word);
-	s->count = t->count;
-	s->left = t->left;
-	s->right = t->right;
-
+//-------------------------------------------------------------------------
+tnode* tnode_create(const char* word) {
+  tnode* p = (tnode*)malloc(sizeof(tnode));
+  p->word = strdup(word);   //copy of word allocated on heap
+  p->count = 1;
+  p->left = NULL;
+  p->right = NULL;
+  return p;
 }
 
-
-variable *add_to_tree(variable *root, variable *p) {
-
-	if(root == NULL) {
-		root = (variable *) malloc(sizeof(variable));
-		copy_var(root,p);
-	}
-	else {
-		if(strcmp(p->word,root->word) < 0)
-			root->left = add_to_tree(root->left, p);
-		else if(strcmp(p->word, root->word) > 0)
-			root->right = add_to_tree(root->right, p);
-		else
-			root->count++; // Same word occurring again
-	}
-	return root;
+//-------------------------------------------------------------------------
+void tnode_delete(tnode* t) {
+  free((void*)t->word);
+  free(t);
 }
 
-
-variable *add_to_group(variable *p) {
-
-	int i = 0, inserted_flag = 0;
-	for( ; i < group_count; i++) {
-		if(strncmp(groups[i].word, p->word, cmp_index_limit) == 0) {
-			add_to_tree(&groups[i], p);
-			inserted_flag = 1;
-		}
-	}
-	if(!inserted_flag) {
-		copy_var(&groups[group_count], p);
-		group_count++;
-	}
+//-------------------------------------------------------------------------
+tree* tree_create() {
+  tree* p = (tree*)malloc(sizeof(tree));
+  p->root = NULL;
+  p->size = 0;
+  return p;
 }
 
-// Check if find is a keyword
+//-------------------------------------------------------------------------
+static void tree_deletenodes(tree* t, tnode* p) {
+  if ( p == NULL) { return; }
 
-int bin_search_keyword_arr(char find[]) {
-
-	int low, high;
-	high = keyword_count - 1;
-	low = 0;
-	while(low <= high) {
-		int mid = (low + high) / 2;
-		//printf("%s -- %s + low: %d high %d mid %d \n",keyword_arr[mid],find,low,high,mid);
-		int comp = strcmp(find, keyword_arr[mid]);
-		if(comp == 0)
-			return mid;
-		else if(comp < 0)
-			high = mid - 1;
-		else
-			low = mid + 1;
-	}
-	return -1;
+  tree_deletenodes(t, p->left);
+  tree_deletenodes(t, p->right);
+  tnode_delete(p);
+  t->size--;
 }
 
-int getch(FILE *fp) {
-	return (bufp > 0) ? buf[--bufp] : fgetc(fp);
+//-------------------------------------------------------------------------
+void tree_delete(tree* t) { tree_deletenodes(t, t->root); }
+
+//-------------------------------------------------------------------------
+bool tree_empty(tree* t) { return t->size == 0; }
+
+//-------------------------------------------------------------------------
+size_t tree_size(tree* t) { return t->size; }
+
+//-------------------------------------------------------------------------
+static tnode* tree_addnode(tree* t, tnode** p, const char* w) {
+  int compare;
+
+  if (*p == NULL) {
+    *p = tnode_create(w);
+    t->size++;
+  } else if ((compare = strcmp(w, (*p)->word)) == 0) {
+    (*p)->count++;
+  } else if (compare < 0) { tree_addnode(t, &(*p)->left, w);
+  } else {
+    tree_addnode(t, &(*p)->right, w);
+  }
+
+  return *p;
 }
 
-void ungetch(int c) {
-	if(bufp >= BUFSIZE)
-		printf("\nUngetch: Too many characters");
-	else
-		buf[bufp++] = c;
+//-------------------------------------------------------------------------
+tnode* tree_add(tree* t, const char* word) {
+  tnode* p = tree_addnode(t, &(t->root), word);
+  return p;
 }
 
+//-------------------------------------------------------------------------
+tree* console_input() {
+  tree* t = tree_create();
 
-// getword returns the length of the word.
-// Word can begin with an underscore.
-int getword(char *word, int lim, FILE *fp) {
+  char line[BUFSIZ];
+  memset(line, 0, BUFSIZ);
 
-	int c;
-	char *w = word;
+  int c, i = 0;
+  for ( ; i < BUFSIZ - 1 && ((c = getchar()) != EOF && c != '\n'); ++i) {
+    line[i] = c;
+  }
+  line[i] = '\0';
 
-	while(isspace(c = getch(fp)));
-	if(c == EOF)
-		return -1;
+  char* p = strtok(line, ",. !");
+  tree_add(t, p);
 
-	// Word begin with alpha or _
-	if(isalpha(c) || c == '_')
-		*w++ = c;
-	//Remove <*>
-	if(c == '<') {
-		while(c != '>')
-			c = getch(fp);
-	}
+  while (p != NULL) {
+    p = strtok(NULL, ", .!");
+    if (p == NULL) { continue; }
+    tree_add(t, p);
+  }
 
-	//Remove comments
-	if(c == '/') {
-		c = getch(fp);
-		if(c == '/') {
-			while(c != '\n' && c != EOF)
-				c = getch(fp); // skip till end of line.
-		}
-		else if(c == '*') {
-			while(1) {
-				c = getch(fp);
-				if(c == '*') {
-					c = getch(fp);
-					if(c == '/' || c == EOF)
-						break; // break on abrupt end of file.
-				}
-				if(c == EOF)
-					break; // break on abrupt end of file.
-			}
-		}
-	}
-
-	//Remove string constants
-	if(c == '"') {
-		do{
-			c = getch(fp);
-		} while(c != '"' && c != EOF);
-	}
-
-	if(!isalpha(c) && c != '_') {
-		*w = '\0';
-		return w - word;
-	}
-	for( ; --lim > 0; w++) {
-		*w = getch(fp);
-
-		if(!isalnum(*w) && *w != '_') {
-			ungetch(*w);
-			break;
-		}
-	}
-	*w = '\0';
-	return w - word;
+  return t;
 }
 
+//-------------------------------------------------------------------------
+tree* file_input(const char* filename) {
+  tree* t = tree_create();
 
+  FILE* f = fopen(filename, "r");
+  if (f == NULL) {
+    fprintf(stderr, "Error opening file: %s\n", filename);
+    fclose(f);
+    exit(1);
+  }
 
-// For using binary search
-void sort_keyword_arr() {
-	int i = 0;
-	char *t;
-	for(i = 0; i < keyword_count - 1; i++) {
-		if(strcmp(keyword_arr[i], keyword_arr[i+1]) > 0) {
-			t = keyword_arr[i];
-			keyword_arr[i] = keyword_arr[i+1];
-			keyword_arr[i+1] = t;
-			i = -1;
-		}
-	}
+  char line[BUFSIZ];
+  memset(line, 0, BUFSIZ);
+
+  while (fgets(line, BUFSIZ, f) != NULL) {
+    if (*line == '\n') { continue; }
+    char* p = strtok(line, ",. !\n");
+    tree_add(t, p);
+
+    while (p != NULL) {
+      p = strtok(NULL, ",. !\n");
+      if (p == NULL) { continue; }
+      tree_add(t, p);
+    }
+  }
+
+  fclose(f);
+  return t;
 }
 
-void sort_groups_arr() {
-	int i = 0;
-	variable t;
-	for(i = 0; i < group_count-1; i++) {
-		if(strcmp(groups[i].word, groups[i+1].word) > 0) {
-			t = groups[i];
-			groups[i] = groups[i+1];
-			groups[i+1] = t;
-			i = -1;
-		}
-	}
+//-------------------------------------------------------------------------
+void tree_clear(tree* t) {
+  tree_delete(t);
+  t->root = NULL;
+  t->size = 0;
 }
 
-variable *create_node(char *w) {
-
-	variable *a = (variable *) malloc(sizeof(variable));
-	strcpy(a->word, w);
-	a->count = 1; // Found one already.
-	a->left = NULL;
-	a->right = NULL;
-	return a;
+//-------------------------------------------------------------------------
+void tree_print(tnode* p) {
+  printf("%s -- %d  (%p, %p)\n", p->word, p->count, p->left, p->right);
 }
 
-void traverse_tree(variable *root) {
+//-------------------------------------------------------------------------
+static void tree_printnodes_inorder(tree* t, tnode* p) {
+  if (p == NULL) { return; }
 
-	if(root != NULL) {
-		traverse_tree(root->left);
-		printf("%s - Count: %d \n", root->word, root->count);
-		traverse_tree(root->right);
-	}
+  tree_printnodes_inorder(t, p->left);
+  tree_print(p);
+  tree_printnodes_inorder(t, p->right);
 }
 
-int main(int argc,char *argv[]) {
+//-------------------------------------------------------------------------
+void tree_print_inorder(tree* t) {
+  tree_printnodes_inorder(t, t->root);
+}
 
-	char line[MAXLEN];
-	FILE *fp = fopen("t2.txt","r"); // Input file with C program
-	if(fp != NULL) {
+//-------------------------------------------------------------------------
+static void tree_printnodes_preorder(tree* t, tnode* p) {
+  if (p == NULL) { return; }
 
-		if(argc > 1) {
-			cmp_index_limit = atoi(argv[1]);
-		}
-		// Calculate no of keywords
-		int i = 0;
-		while(keyword_arr[i++][0] != '\0')
-			keyword_count++;
-		// Sort keywords for binary search
+  tree_print(p);
+  tree_printnodes_preorder(t, p->left);
+  tree_printnodes_preorder(t, p->right);
+}
 
-		sort_keyword_arr();
+//-------------------------------------------------------------------------
+void tree_print_preorder(tree* t) {
+  tree_printnodes_preorder(t, t->root);
+}
 
-		// Sort list
-		/*for(i = 0; i < keyword_count; i++)
-			puts(keyword_arr[i]); */
+//-------------------------------------------------------------------------
+static void tree_printnodes_postorder(tree* t, tnode* p) {
+  if (p == NULL) { return; }
 
+  tree_printnodes_postorder(t, p->left);
+  tree_printnodes_postorder(t, p->right);
+  tree_print(p);
+}
 
-		puts("Results: ");
-		while(getword(line, MAXLEN, fp) != -1) {
-			if(line[0] != '\0' && bin_search_keyword_arr(line) == -1) {
-				// line should not be null and must not be a keyword.
-				//puts(line);
-				variable *node = create_node(line);
-				//puts(node->word);
-				add_to_group(node);
-			}
-		}
-		fclose(fp);
+//-------------------------------------------------------------------------
+void tree_print_postorder(tree* t) {
+  tree_printnodes_postorder(t, t->root);
+}
 
-		// Sort groups to alphabetical order
-		sort_groups_arr();
-		for(i = 0; i < group_count; i++) {
-			printf("Group - %d \n", i+1);
-			traverse_tree(&groups[i]);
-			putchar('\n');
-		}
-	}
-	return 0;
+//-------------------------------------------------------------------------
+void tree_printnodes_n(tnode* p, int n) {
+  static tnode* prev = NULL;
+
+  if (p != NULL) {
+    tree_printnodes_n(p->left, n);
+    if (prev == NULL) { printf("%s ", p->word); }
+
+    if (prev != NULL) {
+      if (strncmp(prev->word, p->word, n) == 0) {
+        printf("%s ", p->word);
+      }
+      else { printf("\n%s ", p->word); }
+    }
+    prev = p;
+  }
+  else { return; }
+  tree_printnodes_n(p->right, n);
+}
+
+//-------------------------------------------------------------------------
+void tree_print_n(tree* t, int n) {
+  if (n == 0) { tree_print_inorder(t); }
+  else { tree_printnodes_n(t->root, n); }
+}
+
+//-------------------------------------------------------------------------
+int main(int argc, const char* argv[]) {
+  int lim = COMP_LIMIT;
+  tree* t = NULL;
+
+  if (argc == 1) {
+    printf("Waiting for tree data input:\n");
+    t = console_input();
+  }
+
+  if (argc == 2) {
+    lim = atoi(argv[1]);
+    printf("Waiting for tree data input:\n");
+    t = console_input();
+  }
+
+  if (argc == 3) {
+    lim = atoi(argv[1]);
+    const char* filename = argv[2];
+    t = file_input(filename);
+  }
+
+  tree_print_inorder(t);
+
+  printf("\nPrinting tree with %d letter comparisons\n\n", lim);
+  tree_print_n(t, lim);
+  printf("\nIs my tree empty? %s\n", tree_empty(t) ? "Yes" : "No");
+
+  tree_clear(t);
+  printf("\nClearing tree...\n");
+  printf("Is my tree empty? %s\n", tree_empty(t) ? "Yes" : "No");
+
+  free(t);
+
+  return 0;
 }

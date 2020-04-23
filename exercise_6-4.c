@@ -1,339 +1,284 @@
-#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
+#define MAX_FREQ 200
 
-typedef struct WORD
-{
-  char *Word;
-  size_t Count;
-  struct WORD *Left;
-  struct WORD *Right;
-} WORD;
+//-------------------------------------------------------------------------
+typedef struct tnode tnode;
+struct tnode {
+  const char* word;
+  int count;
+  tnode* left;
+  tnode* right;
+};
 
-#define SUCCESS                      0
-#define CANNOT_MALLOC_WORDARRAY      1
-#define NO_WORDS_ON_INPUT            2
-#define NO_MEMORY_FOR_WORDNODE       3
-#define NO_MEMORY_FOR_WORD           4
+//-------------------------------------------------------------------------
+typedef struct tree tree;
+struct tree {
+  tnode* root;
+  size_t size;
+};
 
-
-#define NONALPHA "1234567890 \v\f\n\t\r+=-*/\\,.;:'#~?<>|{}[]`!\"�$%^&()"
-
-int ReadInputToTree(WORD **DestTree, size_t *Treecount, FILE *Input);
-int AddToTree(WORD **DestTree, size_t *Treecount, char *Word);
-int WalkTree(WORD **DestArray, WORD *Word);
-int CompareCounts(const void *vWord1, const void *vWord2);
-int OutputWords(FILE *Dest, size_t Count, WORD **WordArray);
-void FreeTree(WORD *W);
-char *dupstr(char *s);
-
-
-int main(void)
-{
-  int Status = SUCCESS;
-  WORD *Words = NULL;
-  size_t Treecount = 0;
-  WORD **WordArray = NULL;
-
-  /* Read the words on stdin into a tree */
-  if(SUCCESS == Status)
-  {
-    Status = ReadInputToTree(&Words, &Treecount, stdin);
-  }
-
-  /* Sanity check for no sensible input */
-  if(SUCCESS == Status)
-  {
-    if(0 == Treecount)
-    {
-      Status = NO_WORDS_ON_INPUT;
-    }
-  }
-
-  /* allocate a sufficiently large array */
-  if(SUCCESS == Status)
-  {
-     WordArray = malloc(Treecount * sizeof *WordArray);
-     if(NULL == WordArray)
-     {
-       Status = CANNOT_MALLOC_WORDARRAY;
-     }
-  }
-
-  /* Walk the tree into the array */
-  if(SUCCESS == Status)
-  {
-    Status = WalkTree(WordArray, Words);
-  }
-
-  /* qsort the array */
-  if(SUCCESS == Status)
-  {
-    qsort(WordArray, Treecount, sizeof *WordArray, CompareCounts);
-  }
-
-  /* walk down the WordArray outputting the values */
-  if(SUCCESS == Status)
-  {
-    Status = OutputWords(stdout, Treecount, WordArray);
-  }
-
-  /* free the word array */
-  if(NULL != WordArray)
-  {
-    free(WordArray);
-    WordArray = NULL;
-  }
-
-  /* and free the tree memory */
-  if(NULL != Words)
-  {
-    FreeTree(Words);
-    Words = NULL;
-  }
-
-  /* Error report and we are finshed */
-  if(SUCCESS != Status)
-  {
-    fprintf(stderr, "Program failed with code %d\n", Status);
-  }
-  return (SUCCESS == Status ? EXIT_SUCCESS : EXIT_FAILURE);
+//-------------------------------------------------------------------------
+tnode* tnode_create(const char* word) {
+  tnode* p = (tnode*)malloc(sizeof(tnode));
+  p->word = strdup(word);   //copy of word allocated on heap
+  p->count = 1;
+  p->left = NULL;
+  p->right = NULL;
+  return p;
 }
 
+//-------------------------------------------------------------------------
+void tnode_delete(tnode* t) {
+  free((void*)t->word);
+  free(t);
+}
 
+//-------------------------------------------------------------------------
+tree* tree_create() {
+  tree* p = (tree*)malloc(sizeof(tree));
+  p->root = NULL;
+  p->size = 0;
+  return p;
+}
 
+//-------------------------------------------------------------------------
+static void tree_deletenodes(tree* t, tnode* p) {
+  if ( p == NULL) { return; }
 
-void FreeTree(WORD *W)
-{
-  if(NULL != W)
-  {
-    if(NULL != W->Word)
-    {
-      free(W->Word);
-      W->Word = NULL;
+  tree_deletenodes(t, p->left);
+  tree_deletenodes(t, p->right);
+  tnode_delete(p);
+  t->size--;
+}
+
+//-------------------------------------------------------------------------
+void tree_delete(tree* t) { tree_deletenodes(t, t->root); }
+
+//-------------------------------------------------------------------------
+void tree_freq_delete(tree* tr[]) {
+  for (int i = 1; i < MAX_FREQ; ++i) {
+    tree* t = tr[i];
+
+    if (t != NULL) {
+      tree_delete(t);
+      t = NULL;
     }
-    if(NULL != W->Left)
-    {
-      FreeTree(W->Left);
-      W->Left = NULL;
+  }
+
+}
+
+//-------------------------------------------------------------------------
+bool tree_empty(tree* t) { return t->size == 0; }
+
+//-------------------------------------------------------------------------
+size_t tree_size(tree* t) { return t->size; }
+
+//-------------------------------------------------------------------------
+static tnode* tree_addnode(tree* t, tnode** p, const char* w) {
+  int compare;
+
+  if (*p == NULL) {
+    *p = tnode_create(w);
+    t->size++;
+  } else if ((compare = strcmp(w, (*p)->word)) == 0) {
+    (*p)->count++;
+  } else if (compare < 0) { tree_addnode(t, &(*p)->left, w);
+  } else {
+    tree_addnode(t, &(*p)->right, w);
+  }
+
+  return *p;
+}
+
+//-------------------------------------------------------------------------
+tnode* tree_add(tree* t, const char* word) {
+  tnode* p = tree_addnode(t, &(t->root), word);
+  return p;
+}
+
+//-------------------------------------------------------------------------
+static tnode* tree_freq_addnode(tree* t, tnode** p, tnode* base_p) {
+  int compare;
+  if(*p == NULL) {
+    *p = tnode_create(base_p->word);
+    (*p)->count = base_p->count;
+    (*p)->left = NULL;
+    (*p)->right = NULL;
+  }
+  else if ((compare = strcmp(base_p->word, (*p)->word)) < 0) {
+    tree_freq_addnode(t, &(*p)->left, base_p);
+  }
+  else if (compare > 0) {
+    tree_freq_addnode(t, &(*p)->right, base_p);
+  }
+
+  return *p;
+}
+
+//-------------------------------------------------------------------------
+static void tree_freq_node_fromtree(tree* tr[], tnode* base_node) {
+  if (base_node == NULL) { return; }
+  tree_freq_node_fromtree(tr, base_node->left);
+
+  int i = base_node->count;
+  tree** t = &tr[i];
+
+  if (*t == NULL && i != 0) {
+    *t = tree_create();
+  }
+  tree_freq_addnode(*t, &(*t)->root, base_node);
+  tree_freq_node_fromtree(tr, base_node->right);
+}
+
+//-------------------------------------------------------------------------
+void tree_freq_fromtree(tree* tr[], tree* base_tree) {
+  tree_freq_node_fromtree(tr, base_tree->root);
+}
+
+//-------------------------------------------------------------------------
+void console_input(tree* t, int argc, const char* argv[]) {
+  int i = 1;
+  char* p = strtok((char*)argv[i++], ",. !");
+  tree_add(t, p);
+
+  while (p != NULL && i < argc) {
+    p = strtok((char*)argv[i], ", .!");
+    tree_add(t, p);
+    ++i;
+  }
+}
+
+//-------------------------------------------------------------------------
+void file_input(tree* t, const char* filename) {
+  FILE* f = fopen(filename, "r");
+  if (f == NULL) {
+    fprintf(stderr, "Error opening file: %s\n", filename);
+    fclose(f);
+    exit(1);
+  }
+
+  char line[BUFSIZ];
+  memset(line, 0, BUFSIZ);
+
+  while (fgets(line, BUFSIZ, f) != NULL) {
+    if (*line == '\n') { continue; }
+    char* p = strtok(line, ",. !\n");
+    tree_add(t, p);
+
+    while (p != NULL) {
+      p = strtok(NULL, ",. !\n");
+      if (p == NULL) { continue; }
+      tree_add(t, p);
     }
-    if(NULL != W->Right)
-    {
-      FreeTree(W->Right);
-      W->Right = NULL;
+  }
+
+  fclose(f);
+}
+
+//-------------------------------------------------------------------------
+tree* get_input(int argc, const char* argv[]) {
+  tree* t = tree_create();
+
+  if (argc == 1) {
+    fprintf(stderr, "Usage: ./program file/keyboard input\n");
+    exit(1);
+  }
+
+  if (argc == 2) {
+    const char* filename = argv[1];
+    file_input(t, filename);
+  }
+
+  if (argc > 2) {
+    console_input(t, argc, argv);
+  }
+  return t;
+}
+
+//-------------------------------------------------------------------------
+void tree_clear(tree* t) {
+  tree_delete(t);
+  t->root = NULL;
+  t->size = 0;
+}
+
+//-------------------------------------------------------------------------
+void tree_print(tnode* p) {
+  printf("%s -- %d\n", p->word, p->count);
+}
+
+//-------------------------------------------------------------------------
+static void tree_printnodes_inorder(tree* t, tnode* p) {
+  if (p == NULL) { return; }
+
+  tree_printnodes_inorder(t, p->left);
+  tree_print(p);
+  tree_printnodes_inorder(t, p->right);
+}
+
+//-------------------------------------------------------------------------
+void tree_print_inorder(tree* t) {
+  tree_printnodes_inorder(t, t->root);
+}
+
+//-------------------------------------------------------------------------
+static void tree_printnodes_preorder(tree* t, tnode* p) {
+  if (p == NULL) { return; }
+
+  tree_print(p);
+  tree_printnodes_preorder(t, p->left);
+  tree_printnodes_preorder(t, p->right);
+}
+
+//-------------------------------------------------------------------------
+void tree_print_preorder(tree* t) {
+  tree_printnodes_preorder(t, t->root);
+}
+
+//-------------------------------------------------------------------------
+static void tree_printnodes_postorder(tree* t, tnode* p) {
+  if (p == NULL) { return; }
+
+  tree_printnodes_postorder(t, p->left);
+  tree_printnodes_postorder(t, p->right);
+  tree_print(p);
+}
+
+//-------------------------------------------------------------------------
+void tree_print_postorder(tree* t) {
+  tree_printnodes_postorder(t, t->root);
+}
+
+//-------------------------------------------------------------------------
+void tree_freq_print(tree* tr[]) {
+  for (int i = MAX_FREQ - 1; i >= 1; --i) {
+    tree* t = tr[i];
+    if (t != NULL && t->root != NULL) {
+      tree_print_inorder(t);
     }
   }
 }
 
+//-------------------------------------------------------------------------
+int main(int argc, const char* argv[]) {
 
-int AddToTree(WORD **DestTree, size_t *Treecount, char *Word)
-{
-  int Status = SUCCESS;
-  int CompResult = 0;
+  tree* t = get_input(argc, argv);
 
-  /* safety check */
-  assert(NULL != DestTree);
-  assert(NULL != Treecount);
-  assert(NULL != Word);
+  tree* trees[MAX_FREQ];
+  memset(trees, 0, MAX_FREQ * sizeof(tree*));
 
-  /* ok, either *DestTree is NULL or it isn't (deep huh?) */
-  if(NULL == *DestTree)  /* this is the place to add it then */
-  {
-    *DestTree = malloc(sizeof **DestTree);
-    if(NULL == *DestTree)
-    {
-      /* horrible - we're out of memory */
-      Status = NO_MEMORY_FOR_WORDNODE;
-    }
-    else
-    {
-      (*DestTree)->Left = NULL;
-      (*DestTree)->Right = NULL;
-      (*DestTree)->Count = 1;
-      (*DestTree)->Word = dupstr(Word);
-      if(NULL == (*DestTree)->Word)
-      {
-        /* even more horrible - we've run out of memory in the middle */
-        Status = NO_MEMORY_FOR_WORD;
-        free(*DestTree);
-        *DestTree = NULL;
-      }
-      else
-      {
-        /* everything was successful, add one to the tree nodes count */
-        ++*Treecount;
-      }
-    }
-  }
-  else  /* we need to make a decision */
-  {
-    CompResult = strcmp(Word, (*DestTree)->Word);
-    if(0 < CompResult)
-    {
-      Status = AddToTree(&(*DestTree)->Left, Treecount, Word);
-    }
-    else if(0 > CompResult)
-    {
-      Status = AddToTree(&(*DestTree)->Left, Treecount, Word);
-    }
-    else
-    {
-      /* add one to the count - this is the same node */
-      ++(*DestTree)->Count;
-    }
-  }  /* end of else we need to make a decision */
+  tree_freq_fromtree(trees, t);
 
-  return Status;
-}
+  tree_freq_print(trees);
+  tree_freq_delete(trees);
 
+  tree_clear(t);
+  free(t);
+  free(*trees);
 
-int ReadInputToTree(WORD **DestTree, size_t *Treecount, FILE *Input)
-{
-  int Status = SUCCESS;
-  char Buf[8192] = {0};
-  char *Word = NULL;
-
-  /* safety check */
-  assert(NULL != DestTree);
-  assert(NULL != Treecount);
-  assert(NULL != Input);
-
-  /* for every line */
-  while(NULL != fgets(Buf, sizeof Buf, Input))
-  {
-    /* strtok the input to get only alpha character words */
-    Word = strtok(Buf, NONALPHA);
-    while(SUCCESS == Status && NULL != Word)
-    {
-      /* deal with this word by adding it to the tree */
-      Status = AddToTree(DestTree, Treecount, Word);
-
-      /* next word */
-      if(SUCCESS == Status)
-      {
-        Word = strtok(NULL, NONALPHA);
-      }
-    }
-  }
-
-  return Status;
-}
-
-
-
-
-int WalkTree(WORD **DestArray, WORD *Word)
-{
-  int Status = SUCCESS;
-  static WORD **Write = NULL;
-
-  /* safety check */
-  assert(NULL != Word);
-
-  /* store the starting point if this is the first call */
-  if(NULL != DestArray)
-  {
-    Write = DestArray;
-  }
-
-  /* Now add this node and it's kids */
-  if(NULL != Word)
-  {
-    *Write = Word;
-    ++Write;
-    if(NULL != Word->Left)
-    {
-      Status = WalkTree(NULL, Word->Left);
-    }
-    if(NULL != Word->Right)
-    {
-      Status = WalkTree(NULL, Word->Right);
-    }
-  }
-
-  return Status;
-}
-
-
-/*
-   CompareCounts is called by qsort. This means that it gets pointers to the
-   data items being compared. In this case the data items are pointers too.
-*/
-int CompareCounts(const void *vWord1, const void *vWord2)
-{
-  int Result = 0;
-  WORD * const *Word1 = vWord1;
-  WORD * const *Word2 = vWord2;
-
-  assert(NULL != vWord1);
-  assert(NULL != vWord2);
-
-  /* ensure the result is either 1, 0 or -1 */
-  if((*Word1)->Count < (*Word2)->Count)
-  {
-    Result = 1;
-  }
-  else if((*Word1)->Count > (*Word2)->Count)
-  {
-    Result = -1;
-  }
-  else
-  {
-    Result = 0;
-  }
-
-  return Result;
-}
-
-
-int OutputWords(FILE *Dest, size_t Count, WORD **WordArray)
-{
-  int Status = SUCCESS;
-  size_t Pos = 0;
-
-  /* safety check */
-  assert(NULL != Dest);
-  assert(NULL != WordArray);
-
-  /* Print a header */
-  fprintf(Dest, "Total Words : %lu\n", (unsigned long)Count);
-
-  /* Print the words in descending order */
-  while(SUCCESS == Status && Pos < Count)
-  {
-    fprintf(Dest, "%10lu %s\n", (unsigned long)WordArray[Pos]->Count, WordArray[Pos]->Word);
-    ++Pos;
-  }
-
-  return Status;
-}
-
-
-/*
-    dupstr: duplicate a string
-*/
-char *dupstr(char *s)
-{
-  char *Result = NULL;
-  size_t slen = 0;
-
-  /* sanity check */
-  assert(NULL != s);
-
-  /* get string length */
-  slen = strlen(s);
-
-  /* allocate enough storage */
-  Result = malloc(slen + 1);
-
-  /* populate string */
-  if(NULL != Result)
-  {
-    memcpy(Result, s, slen);
-    *(Result + slen) = '\0';
-  }
-
-  return Result;
+  return 0;
 }
